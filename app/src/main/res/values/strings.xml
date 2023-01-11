@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">데이터 수집 앱</string>
+    <string name='accX'>대기</string>
+    <string name='accY'>대기</string>
+    <string name='accZ'>대기</string>
+</resources>
