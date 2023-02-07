@@ -1,11 +1,15 @@
 package com.example.hello
 
+import android.Manifest
+import android.app.Service
+import android.content.ContentProviderClient
 import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Location
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
@@ -15,6 +19,10 @@ import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.app.ActivityCompat
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationListener
+import com.google.android.gms.location.LocationServices
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 
@@ -30,9 +38,14 @@ import java.net.URISyntaxException
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.storage.ktx.storage
 import java.io.IOException
+import java.util.Timer
+import java.util.TimerTask
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
+
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var locationListener: LocationListener
 
     // 시작여부 판별
     private var isStart = false
@@ -66,6 +79,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var requiredPermission = arrayOf(
         android.Manifest.permission.BODY_SENSORS,
         android.Manifest.permission.RECORD_AUDIO,
+//        android.Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+        android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        android.Manifest.permission.ACCESS_FINE_LOCATION
     )
 
     // 시작점 역할을 하는 함수
@@ -76,16 +92,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         var isGranted = false; // 처음 시작시 권한부여가 되지 않음
         for(permission in requiredPermission){ // 필요한 권한마다 권한을 요청함
             if(checkSelfPermission(permission) == PackageManager.PERMISSION_DENIED){
-                isGranted = true;
+//                isGranted = true;
                 break;
             }
         }
+
         print("승인여부: $isGranted\n")
         if(!isGranted){ // 만약 권한이 승인되지 않은 경우 권한을 재요청
             requestPermissions(requiredPermission, 0);
-        } else { // 필요한 권한을 모두 승인받으면 앱 초기화 함수 실행(init)
-            init()
         }
+        init()
 
         // 스마트폰 UI 상에 표시된 부분 확인하기
         val btn_event = findViewById<Button>(R.id.e_btn)
@@ -147,6 +163,28 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         sensorManager.apply {
             accSensor = getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         }
+
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.d("Location", "권한 거부")
+            return
+        }
+        fusedLocationClient.lastLocation
+            .addOnSuccessListener { location: Location?->
+                val lat = location?.latitude
+                val lng = location?.longitude
+                Toast.makeText(applicationContext, "위도 $lat 경도 $lng", Toast.LENGTH_LONG).show()
+              }
+            .addOnFailureListener({Toast.makeText(applicationContext, "위치 데이터 수집 실패", Toast.LENGTH_LONG).show()})
+
+//        makeLocaionListener()
     }
 
     override fun onResume() {
@@ -273,6 +311,45 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         mSocket!!.connect()
     }
 
+    private fun makeLocaionListener(){
+        locationListener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                // 위치 정보 전달 목적으로 호출(자동으로 호출)
+
+                val longitude = location.longitude
+                val latitude = location.latitude
+
+                Log.d("Location", "Latitude : $latitude, Longitude : $longitude")
+            }
+        }
+    }
+
+//    private fun makeLocationTimer(){
+//
+//        if (ActivityCompat.checkSelfPermission(
+//                this,
+//                Manifest.permission.ACCESS_FINE_LOCATION
+//            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
+//                this,
+//                Manifest.permission.ACCESS_COARSE_LOCATION
+//            ) != PackageManager.PERMISSION_GRANTED
+//        ) {
+//            // TODO: Consider calling
+//            //    ActivityCompat#requestPermissions
+//            // here to request the missing permissions, and then overriding
+//            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+//            //                                          int[] grantResults)
+//            // to handle the case where the user grants the permission. See the documentation
+//            // for ActivityCompat#requestPermissions for more details.
+//            return
+//        }
+//
+//        Timer().schedule(object: TimerTask(){
+//            override fun run() {
+//                fusedLocationClient.getLastLocation()
+//            }
+//        }, 5000)
+//    }
 
 
 
