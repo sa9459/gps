@@ -15,14 +15,19 @@ import android.net.Uri
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
+import androidx.core.location.LocationRequestCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationListener
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.*
+
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 
@@ -38,321 +43,165 @@ import java.net.URISyntaxException
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.storage.ktx.storage
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
 import java.util.Timer
 import java.util.TimerTask
 
-class MainActivity : AppCompatActivity(), SensorEventListener {
-    private lateinit var sensorManager: SensorManager
+class GPSPermissionActivity : AppCompatActivity() {
 
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationListener: LocationListener
+    val TAG: String = "로그"
 
-    // 시작여부 판별
-    private var isStart = false
+    private var mFusedLocationProviderClient: FusedLocationProviderClient? = null // 현재 위치를 가져오기 위한 변수
+    private lateinit var mLastLocation: Location // 위치 값을 가지고 있는 객체
+    internal lateinit var mLocationRequest: LocationRequest  // 위치 정보 요청의 매개변수를 저장하는
+    private val REQUEST_PERMISSION_LOCATION = 10
 
-    // 가속도 데이터 센서를 관리하는 변수
-    private var accSensor: Sensor? = null
+    lateinit var btnStartupdate: Button
+    lateinit var btnStopUpdates: Button
+    lateinit var txtLat: TextView
+    lateinit var txtLong: TextView
+    lateinit var txtTime: TextView
+    private var interval: Long = 0
+    private var fastestInterval: Long = 0
+    private var priority: Long = 0
+    private var maxWaitTimer: Long = 0
 
-    // 가속도 데이터 저장을 위한 리스트
-    private var accList = mutableListOf<AccData>()
-
-    // 오디오 파일
-    private lateinit var recordFile: File
-    private var mediaRecorder: MediaRecorder? = null
-
-    // HTTP 프로토콜을 위한 옵션
-    private val apis = Apis.create()
-
-    // 웹소켓
-    private var mSocket: Socket? = null
-
-    // 기타 옵션
-    private var startAt: Long = 0
-    private var endAt: Long = 0
-    private var createdDateTime: Long = 0
-    private var collectId: Long = 0
-
-    // Firebase 설정
-    private val storage = Firebase.storage
-
-    // 권한 설정과 관련된 옵션
-    private var requiredPermission = arrayOf(
-        android.Manifest.permission.BODY_SENSORS,
-        android.Manifest.permission.RECORD_AUDIO,
-//        android.Manifest.permission.ACCESS_BACKGROUND_LOCATION,
-        android.Manifest.permission.ACCESS_COARSE_LOCATION,
-        android.Manifest.permission.ACCESS_FINE_LOCATION
-    )
-
-    // 시작점 역할을 하는 함수
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState) // 부모(Parent) 클래스를 상속받기 때문에 부모 클래스의 onCreate 호출
-        setContentView(R.layout.activity_main) // 화면에 무엇을 보여줄 것인지 결정하는 함수
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        var isGranted = false; // 처음 시작시 권한부여가 되지 않음
-        for(permission in requiredPermission){ // 필요한 권한마다 권한을 요청함
-            if(checkSelfPermission(permission) == PackageManager.PERMISSION_DENIED){
-//                isGranted = true;
-                break;
+        // 화면뷰 inflate.
+        btnStartupdate = findViewById(R.id.btn_start_upds)
+        btnStopUpdates = findViewById(R.id.btn_stop_upds)
+        txtLat = findViewById(R.id.txtLat)
+        txtLong = findViewById(R.id.txtLong)
+        txtTime = findViewById(R.id.txtTime)
+
+
+
+
+        // 위치 추척 시작 버튼 클릭시 처리
+        btnStartupdate.setOnClickListener {
+            if (checkPermissionForLocation(this)) {
+                startLocationUpdates()
+                // View Button 활성화 상태 변경
+                btnStartupdate.isEnabled = false
+                btnStopUpdates.isEnabled = true
             }
         }
 
-        print("승인여부: $isGranted\n")
-        if(!isGranted){ // 만약 권한이 승인되지 않은 경우 권한을 재요청
-            requestPermissions(requiredPermission, 0);
-        }
-        init()
-
-        // 스마트폰 UI 상에 표시된 부분 확인하기
-        val btn_event = findViewById<Button>(R.id.e_btn)
-        val x = findViewById<TextView>(R.id.accX)
-        val y = findViewById<TextView>(R.id.accY)
-        val z = findViewById<TextView>(R.id.accZ)
-        btn_event.setOnClickListener {
-            if(isStart){ // 수집 중단
-                endAt = System.currentTimeMillis()
-
-                mSocket!!.close() // 웹 소켓 종료
-
-//                stopRecord() // 녹음 중단
-
-                val body = UploadBody(accList, startAt, endAt, "SENSOR_DELAY_GAME", createdDateTime, "smartphone", collectId )
-                apis.uploadData(body).enqueue(object: Callback<UploadResponse>{
-                    override fun onResponse(
-                        call: Call<UploadResponse>,
-                        response: Response<UploadResponse>
-                    ) {
-                        Log.d("데이터 전송", "성공")
-                    }
-
-                    override fun onFailure(call: Call<UploadResponse>, t: Throwable) {
-                        Log.d("데이터 전송", "실패")
-                    }
-                })
-//                uploadMicFirebase(recordFile)
-                uploadDataFirebase(body)
-
-                Toast.makeText(this, "데이터 수집을 중단합니다", Toast.LENGTH_LONG).show();
-                btn_event.text = "수집시작"
-                x.text = "대기"
-                y.text = "대기"
-                z.text = "대기"
-                isStart = false
-            }else{ // 수집시작
-                Toast.makeText(this, "데이터 수집을 시작합니다", Toast.LENGTH_LONG).show();
-                btn_event.text = "수집중단"
-
-                accList.clear(); // 가속도 리스트 초기화
-
-                initSocket() // 웹 소켓 시작
-
-//                startRecord() // 녹음시작
-
-                collectId = System.currentTimeMillis()
-                createdDateTime = System.currentTimeMillis()
-                startAt = System.currentTimeMillis()
-                isStart = true
-            }
+        // 위치 추적 중지 버튼 클릭시 처리
+        btnStopUpdates.setOnClickListener {
+            stoplocationUpdates()
+            txtTime.text = "Updates Stoped"
+            // View Button 활성화 상태 변경
+            btnStartupdate.isEnabled = true
+            btnStopUpdates.isEnabled = false
         }
 
 
     }
 
-    private fun init(){
-        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        sensorManager.apply {
-            accSensor = getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        }
+    // LocationRequest() deprecated 되서 아래 방식으로 LocationRequest 객체 생성
+    // mLocationRequest = LocationRequest() is deprecated
+    private val mLocationRequest= object : LocationRequest {
+        interval = 2000 // 업데이트 간격 단위(밀리초)
+        fastestInterval = 1000 // 가장 빠른 업데이트 간격 단위(밀리초)
+        priority = LocationRequest.PRIORITY_HIGH_ACCURACy // 정확성
+        maxWaitTimer= 2000 // 위치 갱신 요청 최대 대기 시간 (밀리초)
+    }
 
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        if (ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.d("Location", "권한 거부")
+
+    private fun startLocationUpdates() {
+        Log.d(TAG, "startLocationUpdates()")
+
+        //FusedLocationProviderClient의 인스턴스를 생성.
+        mFusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this)
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+            && ActivityCompat.checkSelfPermission(this,Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "startLocationUpdates() 두 위치 권한중 하나라도 없는 경우 ")
             return
         }
-        fusedLocationClient.lastLocation
-            .addOnSuccessListener { location: Location?->
-                val lat = location?.latitude
-                val lng = location?.longitude
-                Toast.makeText(applicationContext, "위도 $lat 경도 $lng", Toast.LENGTH_LONG).show()
-              }
-            .addOnFailureListener({Toast.makeText(applicationContext, "위치 데이터 수집 실패", Toast.LENGTH_LONG).show()})
-
-//        makeLocaionListener()
+        Log.d(TAG, "startLocationUpdates() 위치 권한이 하나라도 존재하는 경우")
+        // 기기의 위치에 관한 정기 업데이트를 요청하는 메서드 실행
+        // 지정한 루퍼 스레드(Looper.myLooper())에서 콜백(mLocationCallback)으로 위치 업데이트를 요청합니다.
+        mFusedLocationProviderClient!!.requestLocationUpdates(mLocationRequest, mLocationCallback, Looper.myLooper())
     }
 
-    override fun onResume() {
-        super.onResume()
-        sensorManager.apply {
-            registerListener(this@MainActivity, accSensor, SensorManager.SENSOR_DELAY_GAME)
+    // 시스템으로 부터 위치 정보를 콜백으로 받음
+    private val mLocationCallback = object : LocationCallback() {
+        override fun onLocationResult(locationResult: LocationResult) {
+            Log.d(TAG, "onLocationResult()")
+            // 시스템에서 받은 location 정보를 onLocationChanged()에 전달
+            locationResult.lastLocation
+            onLocationChanged(locationResult.lastLocation)
         }
     }
 
-    override fun onPause() {
-        super.onPause()
-        sensorManager.unregisterListener(this)
+    // 시스템으로 부터 받은 위치정보를 화면에 갱신해주는 메소드
+    fun onLocationChanged(location: Location) {
+        Log.d(TAG, "onLocationChanged()")
+        mLastLocation = location
+        val date: Date = Calendar.getInstance().time
+        val simpleDateFormat = SimpleDateFormat("hh:mm:ss a")
+        txtTime.text = "Updated at : " + simpleDateFormat.format(date) // 갱신된 날짜
+        txtLat.text = "LATITUDE : " + mLastLocation.latitude // 갱신 된 위도
+        txtLong.text = "LONGITUDE : " + mLastLocation.longitude // 갱신 된 경도
     }
 
-
-    override fun onAccuracyChanged(p0: Sensor?, p1: Int) {
+    // 위치 업데이터를 제거 하는 메서드
+    private fun stoplocationUpdates() {
+        Log.d(TAG, "stoplocationUpdates()")
+        // 지정된 위치 결과 리스너에 대한 모든 위치 업데이트를 제거
+        mFusedLocationProviderClient!!.removeLocationUpdates(mLocationCallback)
     }
 
-    override fun onSensorChanged(event: SensorEvent?) {
-        if(event != null){
-            when(event.sensor.type){
-                Sensor.TYPE_ACCELEROMETER -> getAccelerometerData(event)
+    // 위치 권한이 있는지 확인하는 메서드
+    fun checkPermissionForLocation(context: Context): Boolean {
+        Log.d(TAG, "checkPermissionForLocation()")
+        // Android 6.0 Marshmallow 이상에서는 지리 확보(위치) 권한에 추가 런타임 권한이 필요합니다.
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "checkPermissionForLocation() 권한 상태 : O")
+                true
+            } else {
+                // 권한이 없으므로 권한 요청 알림 보내기
+                Log.d(TAG, "checkPermissionForLocation() 권한 상태 : X")
+                ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION), REQUEST_PERMISSION_LOCATION)
+                false
+            }
+        } else {
+            true
+        }
+    }
+
+    // 사용자에게 권한 요청 후 결과에 대한 처리 로직
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        Log.d(TAG, "onRequestPermissionsResult()")
+        if (requestCode == REQUEST_PERMISSION_LOCATION) {
+            if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "onRequestPermissionsResult() _ 권한 허용 클릭")
+                startLocationUpdates()
+                // View Button 활성화 상태 변경
+                btnStartupdate.isEnabled = false
+                btnStopUpdates.isEnabled = true
+            } else {
+                Log.d(TAG, "onRequestPermissionsResult() _ 권한 허용 거부")
+                Toast.makeText(this@GPSPermissionActivity, "권한이 없어 해당 기능을 실행할 수 없습니다.", Toast.LENGTH_SHORT).show()
             }
         }
     }
-
-    // 가속도 데이터 센서값을 받아들이는 함수
-    private fun getAccelerometerData(event: SensorEvent) {
-        val tag:String = "Accelerometer"
-        val axisX: Float = event.values[0]
-        val axisY: Float = event.values[1]
-        val axisZ: Float = event.values[2]
-        if (isStart) {
-            val x = findViewById<TextView>(R.id.accX)
-            val y = findViewById<TextView>(R.id.accY)
-            val z = findViewById<TextView>(R.id.accZ)
-
-            x.text = axisX.toString()
-            y.text = axisY.toString()
-            z.text = axisZ.toString()
-
-            val accData = AccData(accList.size, axisX, axisY, axisZ, System.currentTimeMillis())
-            mSocket!!.emit("acc", accData.toString())
-            accList.add(accData)
-        }
-    }
-
-    private fun startRecord() {
-        val tag = "startRecord"
-        val time = System.currentTimeMillis()
-        recordFile = File.createTempFile("$time", ".mp3", cacheDir)
-        Log.d(tag, recordFile.absolutePath)
-        mediaRecorder = MediaRecorder().apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setOutputFile(recordFile)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            try {
-                prepare()
-            } catch (e: IOException) {
-                Log.e(tag, "prepare() fail")
-            }
-            start()
-        }
-    }
-
-    private fun stopRecord() {
-        val tag = "stopRecord"
-        mediaRecorder?.apply {
-            try {
-                stop()
-                reset()
-                release()
-            } catch (e: IOException) {
-                Log.e(tag, e.stackTraceToString())
-            }
-            mediaRecorder = null
-        }
-    }
-
-    private fun uploadMicFirebase(data: File){
-        val storageRef = storage.reference
-        val pathString = "mic/" + collectId.toString() + ".mp3"
-        val pathRef = storageRef.child(pathString)
-
-//        var builder = StorageMetadata.Builder().setContentType("audio/mp3")
-//        var metadata = builder.contentType
-
-        Log.d("태그", pathRef.toString())
-
-        var uploadTask = pathRef.putFile(Uri.fromFile(data))
-        uploadTask.addOnFailureListener{
-            Log.d("fb", "파이어베이스 전송 실패")
-        }.addOnSuccessListener {
-            Log.d("fb", "파이어베이스 전송 성공 ")
-        }
-    }
-
-
-    private fun uploadDataFirebase(body: UploadBody){
-        // Create a storage reference from our app
-        val storageRef = storage.reference
-        val pathString = "data/" + collectId.toString() + ".json"
-        val pathRef = storageRef.child(pathString)
-
-        val gson: Gson = GsonBuilder().setLenient().create()
-        var data = gson.toJson(body).toByteArray()
-        Log.d("데이터", data.toString())
-        var uploadTask = pathRef.putBytes(data)
-        uploadTask.addOnFailureListener{
-            Log.d("fb", "파이어베이스 전송 실패")
-        }.addOnSuccessListener {
-            Log.d("fb", "파이어베이스 전송 성공 ")
-        }
-    }
-
-    private fun initSocket() {
-        try {
-            mSocket = IO.socket("http://210.107.206.176:3000/smartphone")
-            Log.d("SOCKET", "Connection success : ")
-        } catch (e: URISyntaxException) {
-            e.printStackTrace()
-        }
-        mSocket!!.connect()
-    }
-
-    private fun makeLocaionListener(){
-        locationListener = object : LocationListener {
-            override fun onLocationChanged(location: Location) {
-                // 위치 정보 전달 목적으로 호출(자동으로 호출)
-
-                val longitude = location.longitude
-                val latitude = location.latitude
-
-                Log.d("Location", "Latitude : $latitude, Longitude : $longitude")
-            }
-        }
-    }
-
-//    private fun makeLocationTimer(){
-//
-//        if (ActivityCompat.checkSelfPermission(
-//                this,
-//                Manifest.permission.ACCESS_FINE_LOCATION
-//            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-//                this,
-//                Manifest.permission.ACCESS_COARSE_LOCATION
-//            ) != PackageManager.PERMISSION_GRANTED
-//        ) {
-//            // TODO: Consider calling
-//            //    ActivityCompat#requestPermissions
-//            // here to request the missing permissions, and then overriding
-//            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-//            //                                          int[] grantResults)
-//            // to handle the case where the user grants the permission. See the documentation
-//            // for ActivityCompat#requestPermissions for more details.
-//            return
-//        }
-//
-//        Timer().schedule(object: TimerTask(){
-//            override fun run() {
-//                fusedLocationClient.getLastLocation()
-//            }
-//        }, 5000)
-//    }
-
-
-
-
-
 }
+
+
+
+
+
+
+
+
+
+
+

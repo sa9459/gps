@@ -1,33 +1,33 @@
 {
   "project_info": {
-    "project_number": "594155142630",
-    "project_id": "hello-3960e",
-    "storage_bucket": "hello-3960e.appspot.com"
+    "project_number": "467479501396",
+    "project_id": "phone-13fbc",
+    "storage_bucket": "phone-13fbc.appspot.com"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:594155142630:android:a104759bb863a576e42a27",
+        "mobilesdk_app_id": "1:467479501396:android:292e1c9ea7cf511623ebc1",
         "android_client_info": {
           "package_name": "com.example.hello"
         }
       },
       "oauth_client": [
         {
-          "client_id": "594155142630-kceqbbml5pt5lfledeel5nh2bgikc2r8.apps.googleusercontent.com",
+          "client_id": "467479501396-hhb40uahnqlop1l0u31b5cpoce0uvpg6.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyD2Ll1dPNJMwDFPc_iVXX3jV1M6krdTr2Y"
+          "current_key": "AIzaSyA8ew0fCeOcA66h4ZJWxzKnN4tZX9YXeoE"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "594155142630-kceqbbml5pt5lfledeel5nh2bgikc2r8.apps.googleusercontent.com",
+              "client_id": "467479501396-hhb40uahnqlop1l0u31b5cpoce0uvpg6.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

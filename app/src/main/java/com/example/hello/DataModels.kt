@@ -1,5 +1,8 @@
 package com.example.hello
 
+import android.icu.util.DateInterval
+import java.util.Timer
+
 data class AccData(
     var idx: Int = 0,
     var x: Float = 0.0f,
@@ -16,6 +19,7 @@ data class UploadBody (
     var createDateTime: Long,
     var deviceId: String = "",
     var collectId: Long = 0,
+
 )
 
 data class UploadResponse (
